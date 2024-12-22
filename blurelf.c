@@ -12,16 +12,17 @@ double gaussian(double x, double sigma);
 int apply_gaussian(int i, const uint8_t *data, size_t size, double sigma);
 
 int main(int argc, char **argv) {
-    const char  *in_path  = NULL;
-    const char  *out_path = NULL;
-    FILE        *in       = NULL;
-    FILE        *out      = NULL;
-    Elf64_Ehdr  *ehdr;
-    Elf64_Phdr  *phdr;
-    uint8_t     *data; 
-    uint8_t     *blured_segment;
-    struct stat st;
-    double      deviation = 1.8;
+    struct stat st              = {0};
+    const char  *in_path        = NULL;
+    const char  *out_path       = NULL;
+    FILE        *in             = NULL;
+    FILE        *out            = NULL;
+    Elf64_Ehdr  *ehdr           = NULL;
+    Elf64_Phdr  *phdr           = NULL;
+    uint8_t     *data           = NULL; 
+    uint8_t     *blured_segment = NULL;
+    double      deviation       = 1.8;
+    int         all_sections    = 0;
     
     for (int i = 1; i < argc; i++) {
         if (argv[i][0] == '-' && argv[i][1] == 'o') {
@@ -29,6 +30,10 @@ int main(int argc, char **argv) {
                     return usage(argv[0]);
                 }
                 out_path = argv[++i];
+                continue;
+        }       
+        if (argv[i][0] == '-' && argv[i][1] == 'a') {
+                all_sections = 1;
                 continue;
         }
         if (argv[i][0] == '-' && argv[i][1] == 's') {
@@ -64,20 +69,25 @@ int main(int argc, char **argv) {
     }
     
     ehdr = (Elf64_Ehdr *)data;
+    phdr = (Elf64_Phdr *)(data + ehdr->e_phoff);
 
     for (int i = 0; i < ehdr->e_phnum; i++) {
-        phdr = (Elf64_Phdr *)(data + ehdr->e_phoff + i * ehdr->e_phentsize);
-
-        if (phdr->p_type == PT_LOAD && phdr->p_flags & PF_X && phdr->p_filesz > 0) {
-            blured_segment = malloc(phdr->p_filesz);
-
-            for (int j = 0; j < (int)phdr->p_filesz; j++) {
-                blured_segment[j] = apply_gaussian(j, data + phdr->p_offset, phdr->p_filesz, deviation);
-            }
-
-            memcpy(data + phdr->p_offset, blured_segment, phdr->p_filesz);
-            free(blured_segment);
+        if (!(phdr[i].p_type == PT_LOAD && phdr[i].p_filesz > 0)) {
+            continue;
         }
+
+        if (!(phdr[i].p_flags & (all_sections ? PF_X : PF_X |PF_R | PF_W))) {
+            continue;
+        }
+
+        blured_segment = malloc(phdr[i].p_filesz);
+
+        for (int j = 0; j < (int)phdr[i].p_filesz; j++) {
+            blured_segment[j] = apply_gaussian(j, data + phdr[i].p_offset, phdr[i].p_filesz, deviation);
+        }
+
+        memcpy(data + phdr[i].p_offset, blured_segment, phdr[i].p_filesz);
+        free(blured_segment);
     }
 
     out = fopen(out_path, "wb");
@@ -113,6 +123,6 @@ double gaussian(double x, double sigma) {
 }
 
 int usage(const char *prog) {
-    fprintf(stderr, "Usage: %s [-o <output>] [-s <standard deviation>] <input>\n", prog);
+    fprintf(stderr, "Usage: %s [-a] [-o <output>] [-s <standard deviation>] <input>\n", prog);
     return 1;
 }
