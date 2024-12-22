@@ -15,14 +15,14 @@ int main(int argc, char **argv) {
     struct stat st              = {0};
     const char  *in_path        = NULL;
     const char  *out_path       = NULL;
+    const char  *section        = ".text";
     FILE        *in             = NULL;
     FILE        *out            = NULL;
     Elf64_Ehdr  *ehdr           = NULL;
-    Elf64_Phdr  *phdr           = NULL;
+    Elf64_Shdr  *shdr           = NULL;
     uint8_t     *data           = NULL; 
-    uint8_t     *blured_segment = NULL;
+    uint8_t     *blured_section = NULL;
     double      deviation       = 1.8;
-    int         all_sections    = 0;
     
     for (int i = 1; i < argc; i++) {
         if (argv[i][0] == '-' && argv[i][1] == 'o') {
@@ -32,8 +32,11 @@ int main(int argc, char **argv) {
                 out_path = argv[++i];
                 continue;
         }       
-        if (argv[i][0] == '-' && argv[i][1] == 'a') {
-                all_sections = 1;
+        if (argv[i][0] == '-' && argv[i][1] == 'S') {
+                if (argc < i) {
+                    return usage(argv[0]);
+                }
+                section = argv[++i];
                 continue;
         }
         if (argv[i][0] == '-' && argv[i][1] == 's') {
@@ -69,25 +72,24 @@ int main(int argc, char **argv) {
     }
     
     ehdr = (Elf64_Ehdr *)data;
-    phdr = (Elf64_Phdr *)(data + ehdr->e_phoff);
+    shdr = (Elf64_Shdr *)(data + ehdr->e_shoff);
+    const char *shrstab = (char *)(data + shdr[ehdr->e_shstrndx].sh_offset);
 
-    for (int i = 0; i < ehdr->e_phnum; i++) {
-        if (!(phdr[i].p_type == PT_LOAD && phdr[i].p_filesz > 0)) {
+    for (int i = 0; i < ehdr->e_shnum; i++) {
+        if (i == ehdr->e_shstrndx) {
+            continue;
+        }
+        if (strcmp(shrstab + shdr[i].sh_name, section)) {
             continue;
         }
 
-        if (!(phdr[i].p_flags & (all_sections ? PF_X : PF_X |PF_R | PF_W))) {
-            continue;
+        blured_section = malloc(shdr[i].sh_size);
+        for (int j = 0; j < (int)shdr[i].sh_size; j++) {
+            blured_section[j] = apply_gaussian(j, data + shdr[i].sh_offset, shdr[i].sh_size, deviation);
         }
 
-        blured_segment = malloc(phdr[i].p_filesz);
-
-        for (int j = 0; j < (int)phdr[i].p_filesz; j++) {
-            blured_segment[j] = apply_gaussian(j, data + phdr[i].p_offset, phdr[i].p_filesz, deviation);
-        }
-
-        memcpy(data + phdr[i].p_offset, blured_segment, phdr[i].p_filesz);
-        free(blured_segment);
+        memcpy(data + shdr[i].sh_offset, blured_section, shdr[i].sh_size);
+        free(blured_section);
     }
 
     out = fopen(out_path, "wb");
@@ -115,7 +117,7 @@ int apply_gaussian(int i, const uint8_t *data, size_t size, double sigma) {
         result += ((double)data[m2]) * g;
     }
 
-    return (uint8_t)result;
+    return result > 255.0 ? 255 : (uint8_t)result;
 }
 
 double gaussian(double x, double sigma) {
