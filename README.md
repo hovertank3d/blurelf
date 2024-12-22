@@ -1,5 +1,5 @@
 # blurelf
-blurelf applies gaussian blur to all loadable and executable sections of the given ELF file
+blurelf applies gaussian blur to selected section (default is .text) of the given ELF file
 
 example:
 
